@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<title>3D模型查看</title>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+	<link type="text/css" rel="stylesheet" href="css/index.css">
+	<script src="js/es-module-shims.js"></script>
+	<script src="js/libs/ammo.wasm.js"></script>
+	<link href="icon.ico" rel="shortcut icon">
+</head>
+
+<body>
+	<div id="progrsess">
+		<h3 id="info">加载中...</h3>	
+	</div>
+	<script type="importmap">{
+		"imports": {
+			"three": "/js/three.module.min.js",
+			"three/": "/js/"
+		}
+	}</script>
+	<script type="module" src="js/index.js"></script>
+</body>
+
+</html>
