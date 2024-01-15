@@ -1,0 +1,604 @@
+////  main.fxsub
+//  MMDStarRail4Fun
+//
+//  Created by 洪梓嫣 on 2022/9/30.
+//  Copyright © 2019 Bilibili. All rights reserved.
+//
+
+#define SOFTSHADOW_RESOLUTION 4096
+
+float4 EgColor; 
+float4 SpcColor;
+
+float4x4 WorldViewProjMatrix : WORLDVIEWPROJECTION;
+float4x4 WorldMatrix : WORLD;
+float4x4 ViewMatrix	 : VIEW;
+
+float4x4 LightWorldViewProjMatrix : WORLDVIEWPROJECTION < string Object = "Light"; >;
+float3   LightDirection	: DIRECTION < string Object = "Light"; >;
+float3   CameraPosition	: POSITION  < string Object = "Camera"; >;
+
+float4 MaterialDiffuse : DIFFUSE < string Object = "Geometry"; >;
+float3 MaterialAmbient : AMBIENT < string Object = "Geometry"; >;
+float3 MaterialEmissive : EMISSIVE < string Object = "Geometry"; >;
+float3 MaterialSpecular : SPECULAR < string Object = "Geometry"; >;
+float SpecularPower : SPECULARPOWER < string Object = "Geometry"; >;
+float3 MaterialToon : TOONCOLOR;
+float4 EdgeColor : EDGECOLOR;
+
+float3 LightDiffuse : DIFFUSE < string Object = "Light"; >;
+float3 LightAmbient : AMBIENT < string Object = "Light"; >;
+float3 LightSpecular : SPECULAR < string Object = "Light"; >;
+static float4 DiffuseColor = MaterialDiffuse * float4(LightDiffuse, 1.0f);
+static float3 AmbientColor = saturate(MaterialAmbient * LightAmbient + MaterialEmissive);
+static float3 SpecularColor = MaterialSpecular * LightSpecular;
+
+float4x4 HeadBone : CONTROLOBJECT < string name = "(self)"; string item = "��"; >;
+
+bool parthf;
+#define SKII1 1500
+#define SKII2 8000
+
+#ifdef LIGHTMAP_TEXTURE
+    texture2D LightMapTexture < string ResourceName = LIGHTMAP_TEXTURE;>;
+    sampler2D LightMapTextureSampler = sampler_state
+    {
+        texture = <LightMapTexture>;
+        FILTER = LINEAR;
+        ADDRESSU = WRAP;
+        ADDRESSV = WRAP;
+    };
+#endif
+
+#ifdef FACEMAP_TEXTURE
+    texture2D FaceMapTexture < string ResourceName = FACEMAP_TEXTURE;>;
+    sampler2D FaceMapTextureSampler = sampler_state
+    {
+        texture = <FaceMapTexture>;
+        FILTER = LINEAR;
+        ADDRESSU = WRAP;
+        ADDRESSV = WRAP;
+    };
+#endif
+
+#ifdef COOLRAMP_TEXTURE
+    texture2D CoolRampTexture < string ResourceName = COOLRAMP_TEXTURE;>;
+    sampler2D CoolRampTextureSampler = sampler_state
+    {
+        texture = <CoolRampTexture>;
+        FILTER = POINT;
+        ADDRESSU = CLAMP;
+        ADDRESSV = CLAMP;
+    };
+#endif
+
+#ifdef WARMRAMP_TEXTURE
+    texture2D WarmRampTexture < string ResourceName = WARMRAMP_TEXTURE;>;
+    sampler2D WarmRampTextureSampler = sampler_state
+    {
+        texture = <WarmRampTexture>;
+        FILTER = POINT;
+        ADDRESSU = CLAMP;
+        ADDRESSV = CLAMP;
+    };
+#endif
+
+#ifdef STOCKING_TEXTURE
+    texture2D StockingTexture < string ResourceName = STOCKING_TEXTURE;>;
+    sampler2D StockingTextureSampler = sampler_state
+    {
+        texture = <StockingTexture>;
+        FILTER = LINEAR;
+        ADDRESSU = WRAP;
+        ADDRESSV = WRAP;
+    };
+#endif
+
+#ifdef NORMAL_TEXTURE
+    texture2D NormalTexture < string ResourceName = NORMAL_TEXTURE;>;
+    sampler2D NormalTextureSampler = sampler_state
+    {
+        texture = <NormalTexture>;
+        FILTER = LINEAR;
+        ADDRESSU = WRAP;
+        ADDRESSV = WRAP;
+    };
+#endif
+
+texture2D DiffuseTexture: MATERIALTEXTURE<
+    string Format = "A8R8G8B8" ;
+>;
+sampler2D DiffuseTextureSampler = sampler_state {
+    texture = <DiffuseTexture>;
+    FILTER = LINEAR;
+    ADDRESSU = WRAP;
+    ADDRESSV = WRAP;
+};
+
+sampler DefSampler : register(s0);
+
+struct Gradient
+{
+    int colorsLength;
+    float4 colors[8];
+};
+
+Gradient GradientConstruct()
+{
+    Gradient g;
+    g.colorsLength = 2;
+    g.colors[0] = float4(1, 1, 1, 0);
+    g.colors[1] = float4(1, 1, 1, 1);
+    g.colors[2] = float4(0, 0, 0, 0);
+    g.colors[3] = float4(0, 0, 0, 0);
+    g.colors[4] = float4(0, 0, 0, 0);
+    g.colors[5] = float4(0, 0, 0, 0);
+    g.colors[6] = float4(0, 0, 0, 0);
+    g.colors[7] = float4(0, 0, 0, 0);
+    return g;
+}
+
+float3 SampleGradient(Gradient Gradient, float Time)
+{
+    float3 color = Gradient.colors[0].rgb;
+    for (int c = 1; c < Gradient.colorsLength; c++)
+    {
+        float colorPos = saturate((Time - Gradient.colors[c - 1].w) / (Gradient.colors[c].w - Gradient.colors[c - 1].w)) * step(c, Gradient.colorsLength - 1);
+        color = lerp(color, Gradient.colors[c].rgb, colorPos);
+    }
+    return color;
+}
+
+float3 desaturation(float3 color)
+{
+    float3 grayXfer = float3(0.3, 0.59, 0.11);
+    float grayf = dot(color, grayXfer);
+    return float3(grayf, grayf, grayf);
+}
+
+static const float e = 2.71828;
+
+float3 W_f(float x,float e0,float e1) {
+    float3 e03 = float3(e0, e0, e0);
+    float3 e13 = float3(e1, e1, e1);
+    float3 a = (x - e03) / (e1 - e03);
+    float3 r = lerp(lerp(a * a*(3 - 2 * a), 1, step(e13, x)), 0, step(x, e03));
+    return r;
+}
+float3 H_f(float3 x, float e) {
+    return 1 - step(x, float3(e,e,e));
+}
+
+float3 GranTurismoTonemapper(float3 x) {
+    float P = 1;
+    float a = 1;
+    float m = 0.22;
+    float l = 0.4;
+    float c = 1.33;
+    float b = 0;
+    float l0 = (P - m)*l / a;
+    float L0 = m - m / a;
+    float L1 = m + (1 - m) / a;
+    float3 L_x = m + a * (x - m);
+    float3 T_x = m * pow(x / m, c) + b;
+    float S0 = m + l0;
+    float S1 = m + a * l0;
+    float C2 = a * P / (P - S1);
+    float3 S_x = P - (P - S1)*pow(e,-(C2*(x-S0)/P));
+    float3 w0_x = 1 - W_f(x, 0, m);
+    float3 w2_x = H_f(x, m + l0);
+    float3 w1_x = 1 - w0_x - w2_x;
+    float3 f_x = T_x * w0_x + L_x * w1_x + S_x * w2_x;
+    return f_x;
+}
+
+struct VS_OUTPUT {
+	float4 positionCS		    : POSITION;		
+	float2 uv		            : TEXCOORD1;
+    float3 positionWS           : TEXCOORD2;
+	float3 normalWS	            : TEXCOORD3;	
+	float3 viewDirectionWS		: TEXCOORD4;
+    float4 ZCalcTex             : TEXCOORD5;
+};
+
+float4 Main_PS(VS_OUTPUT input, float isFrontFace, bool useTexture, bool useSphereMap, bool useToon, bool useSelfShadow)
+{
+    float3 lightDirectionWS = LightDirection * float3(-1,-1,-1);
+	float3 normalWS = normalize(input.normalWS);
+    normalWS = isFrontFace ? normalWS : -normalWS; 
+	float3 viewDirectionWS = normalize(input.viewDirectionWS);
+
+    float4 normalMap = float4(0.5, 0.5, 1, 1);
+    #ifdef NORMAL_TEXTURE
+        normalMap = tex2D(NormalTextureSampler, input.uv);
+        normalMap.g = InvertNormalGreenChannel ? (1 - normalMap.g) : normalMap.g;
+    #endif
+    float3 normalTS = float3(0,0,1);
+    normalTS.xyz = normalMap.rgb * 2 - 1;
+    normalTS.xy *= BumpScale;
+    normalTS = normalize(normalTS);
+
+	float3 dp1 = ddx(input.positionWS);
+	float3 dp2 = ddy(input.positionWS);
+	float2 duv1 = ddx(input.uv);
+	float2 duv2 = ddy(input.uv);
+	float3x3 M = float3x3(dp1, dp2, normalWS);
+	float2x3 I = float2x3(cross(M[1], M[2]), cross(M[2], M[0]));
+	float3 T = mul(float2(duv1.x, duv2.x), I);
+	float3 B = mul(float2(duv1.y, duv2.y), I);
+	float scaleT = 1.0f / (dot(T, T) + 1e-6);
+	float scaleB = 1.0f / (dot(B, B) + 1e-6);
+    float3 tangentWS = normalize(T * scaleT);
+    float3 bitangentWS = -normalize(B * scaleB);
+    float3x3 tbnTransform;
+	tbnTransform[0] = tangentWS;
+	tbnTransform[1] = bitangentWS;
+	tbnTransform[2] = normalWS;
+    normalWS = normalize(mul(normalTS, tbnTransform));
+
+    float3 baseColor = MaterialDiffuse.rgb;
+    float baseAlpha = MaterialDiffuse.a;
+    float4 diffuseTex = 1;
+    if (useTexture)
+    {
+        diffuseTex = tex2D(DiffuseTextureSampler, input.uv);
+    }
+    baseColor *= diffuseTex.rgb;
+    baseAlpha *= diffuseTex.a;
+
+    float3 stockingEffect = 1;
+    float4 stockingMap = float4(0,0,0,1);
+    #ifdef STOCKING_TEXTURE
+        float2 tileUV = input.uv * StockingTileScale + StockingTileOffset;
+        float stockingTile = tex2D(StockingTextureSampler, tileUV).z;
+        stockingMap = tex2D(StockingTextureSampler, input.uv);
+        float stockingUsage = stockingMap.x;
+        float stockingThickness = stockingMap.y;
+        float NoV = dot(normalWS, viewDirectionWS);
+        float fac = NoV;
+        fac = pow(saturate(fac), max(0.01, StockingTransitionPower));
+        fac = saturate((fac - saturate(StockingTransitionHardness)/2)/(1 - saturate(StockingTransitionHardness)));
+        fac = fac * (stockingTile * saturate(StockingTileUsage) + (1 - saturate(StockingTileUsage)));
+        fac = lerp(fac, 1, stockingThickness);
+        Gradient curve = GradientConstruct();
+        curve.colorsLength = 3;
+        curve.colors[0] = float4(StockingDarkColor ,1);
+        curve.colors[1] = float4(StockingTransitionColor, saturate(StockingTransitionThreshold));
+        curve.colors[2] = float4(StockingLightColor, 1);
+        float3 stockingColor = SampleGradient(curve, fac);
+        stockingEffect = lerp(1, stockingColor, stockingUsage);
+    #endif
+    baseColor *= stockingEffect;
+
+    float3 indirectLightRaw = MaterialEmissive * saturate(IndirectLightUsage);
+    float3 indirectLightColor = indirectLightRaw * baseColor;
+
+    float mainLightShadow = 1;
+    if (useSelfShadow)
+    {
+        float4 zCalcTex = input.ZCalcTex;
+        zCalcTex.xyz /= zCalcTex.w;
+        float2 TransTexCoord = 0.5 + zCalcTex.xy * float2(0.5, -0.5);
+
+        float comp;
+		float comp2;
+        float SoftShadowParam = 2;
+        float SelfShadowPower = 1;
+        if (parthf)
+        {
+            float U = SoftShadowParam / SOFTSHADOW_RESOLUTION;
+            float V = SoftShadowParam / SOFTSHADOW_RESOLUTION;
+            comp2  = saturate(max(zCalcTex.z - tex2D(DefSampler, TransTexCoord + float2( U, 0)).r , 0.0f) * SKII2 * TransTexCoord.y - 0.3f) * 2.0f;
+            comp2 += saturate(max(zCalcTex.z - tex2D(DefSampler, TransTexCoord + float2(-U, 0)).r , 0.0f) * SKII2 * TransTexCoord.y - 0.3f);
+            comp2 += saturate(max(zCalcTex.z - tex2D(DefSampler, TransTexCoord + float2( 0, V)).r , 0.0f) * SKII2 * TransTexCoord.y - 0.3f);
+            comp2 += saturate(max(zCalcTex.z - tex2D(DefSampler, TransTexCoord + float2( 0,-V)).r , 0.0f) * SKII2 * TransTexCoord.y - 0.3f);
+            comp2 += saturate(max(zCalcTex.z - tex2D(DefSampler, TransTexCoord + float2( U, V)).r , 0.0f) * SKII2 * TransTexCoord.y - 0.3f);
+            comp2 += saturate(max(zCalcTex.z - tex2D(DefSampler, TransTexCoord + float2(-U, V)).r , 0.0f) * SKII2 * TransTexCoord.y - 0.3f);
+            comp2 += saturate(max(zCalcTex.z - tex2D(DefSampler, TransTexCoord + float2(-U,-V)).r , 0.0f) * SKII2 * TransTexCoord.y - 0.3f);
+            comp2 += saturate(max(zCalcTex.z - tex2D(DefSampler, TransTexCoord + float2( U,-V)).r , 0.0f) * SKII2 * TransTexCoord.y - 0.3f);
+            comp = 1 - saturate(comp2 / 10) * SelfShadowPower;
+        } 
+        else 
+        {
+            float U = SoftShadowParam / SOFTSHADOW_RESOLUTION;
+            float V = SoftShadowParam / SOFTSHADOW_RESOLUTION;
+            comp2  = saturate(max(zCalcTex.z - tex2D(DefSampler, TransTexCoord				).r , 0.0f) * SKII1 - 0.3f) * 2.0f;
+            comp2 += saturate(max(zCalcTex.z - tex2D(DefSampler, TransTexCoord + float2( U, 0)).r , 0.0f) * SKII1 - 0.3f);
+            comp2 += saturate(max(zCalcTex.z - tex2D(DefSampler, TransTexCoord + float2(-U, 0)).r , 0.0f) * SKII1 - 0.3f);
+            comp2 += saturate(max(zCalcTex.z - tex2D(DefSampler, TransTexCoord + float2( 0, V)).r , 0.0f) * SKII1 - 0.3f);
+            comp2 += saturate(max(zCalcTex.z - tex2D(DefSampler, TransTexCoord + float2( 0,-V)).r , 0.0f) * SKII1 - 0.3f);
+            comp2 += saturate(max(zCalcTex.z - tex2D(DefSampler, TransTexCoord + float2( U, V)).r , 0.0f) * SKII1 - 0.3f);
+            comp2 += saturate(max(zCalcTex.z - tex2D(DefSampler, TransTexCoord + float2(-U, V)).r , 0.0f) * SKII1 - 0.3f);
+            comp2 += saturate(max(zCalcTex.z - tex2D(DefSampler, TransTexCoord + float2(-U,-V)).r , 0.0f) * SKII1 - 0.3f);
+            comp2 += saturate(max(zCalcTex.z - tex2D(DefSampler, TransTexCoord + float2( U,-V)).r , 0.0f) * SKII1 - 0.3f);
+            comp = 1 - saturate(comp2 / 10) * SelfShadowPower;
+        }
+        mainLightShadow *= comp;
+    }
+
+    float xx = mainLightShadow;
+
+    float4 lightMap = float4(1.0, 0.39, 0.0, 0.02);
+    #ifdef LIGHTMAP_TEXTURE
+        lightMap = tex2D(LightMapTextureSampler, input.uv);
+    #endif
+
+    float lightThreshold = lightMap.r;
+    float shadowThreshold = lightMap.g;
+    float specularThreshold = lightMap.b;
+    float materialEnum = lightMap.a;
+
+    int materialIndex = (round((materialEnum + 0.0425)/0.0625) - 1)/2;
+    MaterialDetail md = MDS[materialIndex];
+    md.RampIndex = clamp(0, 7, md.RampIndex);
+    md.ShadowCenter = clamp(-1, 1, md.ShadowCenter);
+    md.ShadowSoftness = clamp(0, 1, md.ShadowSoftness);
+    md.Roughness = clamp(0, 1, md.Roughness);
+    md.Metallic = clamp(0, 1, md.Metallic);
+    md.SpecularIntensity = clamp(0, 10, md.SpecularIntensity);
+    md.SpecularThreshold = clamp(-1, 1, md.SpecularThreshold);
+    md.SpecularSoftness = clamp(0, 1, md.SpecularSoftness);
+    md.NonMetalReflectivity = clamp(0, 1, md.NonMetalReflectivity);
+    md.MetalReflectivity = clamp(0, 1, md.MetalReflectivity);
+
+    float NoL = dot(normalWS, lightDirectionWS);
+    float NoL01 = NoL * 0.5 + 0.5;
+
+    float4 faceMap = float4(0,0,0,1);
+    float3 headForward = normalize(HeadBone._31_32_33) * float3(-1,-1,-1);
+    #ifdef FACEMAP_TEXTURE
+        float3 headRight  = normalize(HeadBone._11_12_13) * float3(-1,-1,-1);
+        float3 headUp = cross(headForward, headRight);
+        float3 fixedLightDirectionWS = normalize(lightDirectionWS - dot(lightDirectionWS, headUp) * headUp);
+        float2 sdfUV = float2(sign(dot(fixedLightDirectionWS, headRight)), 1) * input.uv * float2(-1, 1);
+        float sdfValue = tex2Dlod(FaceMapTextureSampler, float4(sdfUV, 0, 0)).a;
+
+        float sdfThreshold = dot(fixedLightDirectionWS, headForward) * 0.5 + 0.5;
+        float sdf = smoothstep(
+                1 - sdfThreshold + md.ShadowCenter - md.ShadowSoftness, 
+                1 - sdfThreshold + md.ShadowCenter + md.ShadowSoftness, 
+                sdfValue);
+        faceMap = tex2D(FaceMapTextureSampler, input.uv);
+        sdf = lerp(1, sdf, step(faceMap.r, 0.25));
+        mainLightShadow = lerp(sdf * mainLightShadow, 1, faceMap.r);
+    #else
+        mainLightShadow *= smoothstep(
+                1 - shadowThreshold + md.ShadowCenter - md.ShadowSoftness, 
+                1 - shadowThreshold + md.ShadowCenter + md.ShadowSoftness, 
+                NoL01);
+    #endif
+    mainLightShadow *= lightThreshold;
+
+    float3 mainLightRaw = lerp(desaturation(LightAmbient), LightAmbient, saturate(MainLightColorUsage)) * max(0, MainLightBrightness);
+    float3 mainLightColor = mainLightRaw;
+
+    float rampUVx = mainLightShadow * (1 - saturate(ShadowRampOffset)) + saturate(ShadowRampOffset);
+    float rampUVy = (2 * md.RampIndex + 1) * (1.0 / (8.0 * 2));
+    float2 rampUV = float2(rampUVx, 1 - rampUVy);
+    float3 coolRamp = 1;
+    float3 warmRamp = 1;
+    #ifdef COOLRAMP_TEXTURE
+        coolRamp = tex2Dlod(CoolRampTextureSampler, float4(rampUV, 0, 0)).rgb;
+    #endif
+    #ifdef WARMRAMP_TEXTURE
+        warmRamp = tex2Dlod(WarmRampTextureSampler, float4(rampUV, 0, 0)).rgb;
+    #endif
+    float isDay = lightDirectionWS.y * 0.5 + 0.5;
+    float3 rampColor = lerp(coolRamp, warmRamp, isDay);
+    rampColor = pow(saturate(rampColor), max(0.01, ShadowRampGamma));
+    mainLightColor *= baseColor * rampColor;
+
+    float3 specularColor = 0;
+    float3 halfVectorWS = normalize(viewDirectionWS + lightDirectionWS);
+    float NoH = dot(normalWS, halfVectorWS);
+    float LoH = dot(lightDirectionWS, halfVectorWS);
+    float3 radiance = mainLightRaw * (mainLightShadow * NoL);
+
+    float perceptualRoughness = saturate(md.Roughness);
+    float roughness = max(perceptualRoughness * perceptualRoughness, 0.0078125);
+    float roughness2 = max(roughness * roughness, 6.103515625e-5);
+    float d = NoH * NoH * (roughness2 - 1) + 1.00001f;
+    float d2 = float(d * d);
+    float LoH2 = LoH * LoH;
+    float normalizationTerm = roughness * 4.0 + 2.0;
+    float specularTerm = roughness2 / (d2 * max(float(0.1), LoH2) * normalizationTerm);
+    specularTerm = saturate(specularTerm);
+    float finalSpecularThreshold = 1 - md.SpecularThreshold - specularThreshold;
+    float specular = step(finalSpecularThreshold, specularTerm);
+    specular = lerp(specular, specularTerm, md.SpecularSoftness);
+    float3 reflectivity = lerp(md.NonMetalReflectivity, md.MetalReflectivity * baseColor, md.Metallic);
+    specularColor = specular * reflectivity * radiance * md.SpecularIntensity * 1;
+
+    float fakeOutlineEffect = 0;
+    #ifdef FACEMAP_TEXTURE
+    {
+        float fakeOutline = faceMap.b;
+        fakeOutlineEffect = smoothstep(0.0, 0.25, pow(saturate(dot(headForward, viewDirectionWS)), 20) * fakeOutline);
+    }
+    #endif
+
+    float3 albedo = indirectLightColor + mainLightColor + specularColor;
+    albedo = max(0, albedo);
+    albedo = pow(albedo, max(0.1, Gamma));
+    albedo = lerp(albedo, GranTurismoTonemapper(albedo), saturate(ToneCurveUsage));
+    albedo = lerp(albedo, EdgeColor, fakeOutlineEffect);
+
+    float alpha = baseAlpha;
+
+    float4 color = float4(albedo,alpha);
+
+    #ifdef DEBUG_FLAG
+        #if DEBUG_FLAG != 0
+            color = float4(0,0,0,1);
+            #if DEBUG_FLAG == DEBUG_FLAG_MATERIAL_DIFFUSE
+                color = MaterialDiffuse;
+            #elif DEBUG_FLAG == DEBUG_FLAG_MATERIAL_AMBIENT
+                color = float4(MaterialAmbient, 1);
+            #elif DEBUG_FLAG == DEBUG_FLAG_MATERIAL_EMISSIVE
+                color = float4(MaterialEmissive, 1);
+            #elif DEBUG_FLAG == DEBUG_FLAG_MATERIAL_SPECULAR
+                color = float4(MaterialSpecular, 1);
+            #elif DEBUG_FLAG == DEBUG_FLAG_LIGHT_DIFFUSE
+                color = float4(LightDiffuse, 1);
+            #elif DEBUG_FLAG == DEBUG_FLAG_LIGHT_AMBIENT
+                color = float4(LightAmbient, 1);
+            #elif DEBUG_FLAG == DEBUG_FLAG_LIGHT_SPECULAR
+                color = float4(LightSpecular, 1);
+            #elif DEBUG_FLAG == DEBUG_FLAG_COLOR_DIFFUSE
+                color = DiffuseColor;
+            #elif DEBUG_FLAG == DEBUG_FLAG_COLOR_AMBIENT
+                color = float4(AmbientColor, 1);
+            #elif DEBUG_FLAG == DEBUG_FLAG_COLOR_SPECULAR
+                color = float4(SpecularColor, 1);
+            #elif DEBUG_FLAG == DEBUG_FLAG_COLOR_EDGE
+                color = EdgeColor;
+            #elif DEBUG_FLAG == DEBUG_FLAG_VECTOR_LIGHT
+                color = float4(lightDirectionWS, 1);
+            #elif DEBUG_FLAG == DEBUG_FLAG_VECTOR_NORMAL
+                color = float4(normalWS, 1);
+            #elif DEBUG_FLAG == DEBUG_FLAG_VECTOR_TANGENT
+                color = float4(tangentWS, 1);
+            #elif DEBUG_FLAG == DEBUG_FLAG_VECTOR_VIEW
+                color = float4(viewDirectionWS, 1);
+            #elif DEBUG_FLAG == DEBUG_FLAG_TEXTURE_DIFFUSE
+                 color =diffuseTex;
+            #elif DEBUG_FLAG == DEBUG_FLAG_TEXTURE_LIGHT
+                color = lightMap;
+            #elif DEBUG_FLAG == DEBUG_FLAG_TEXTURE_STOCKING
+                color = stockingMap;
+            #elif DEBUG_FLAG == DEBUG_FLAG_TEXTURE_FACE
+                color = faceMap;
+            #elif DEBUG_FLAG == DEBUG_FLAG_TEXTURE_NORMAL
+                color = normalMap;
+            #elif DEBUG_FLAG == DEBUG_FLAG_FRAGMENT_STOCKING
+                color = float4(stockingEffect, 1);
+            #elif DEBUG_FLAG == DEBUG_FLAG_FRAGMENT_INDIRECT_LIGHT
+                color = float4(indirectLightRaw, 1);
+            #elif DEBUG_FLAG == DEBUG_FLAG_FRAGMENT_SHADOW
+                color = float4(mainLightShadow.xxx, 1);
+            #elif DEBUG_FLAG == DEBUG_FLAG_FRAGMENT_SHADOW_RAMP
+                color = float4(rampColor, 1);
+            #elif DEBUG_FLAG == DEBUG_FLAG_FRAGMENT_DIRECT_LIGHT
+                color = float4(mainLightRaw, 1);
+            #elif DEBUG_FLAG == DEBUG_FLAG_FRAGMENT_SPECULAR
+                color = float4(specular.xxx, 1);
+            #elif DEBUG_FLAG == DEBUG_FLAG_FRAGMENT_METALLIC
+                color = float4(md.Metallic.xxx, 1);
+            #elif DEBUG_FLAG == DEBUG_FLAG_FRAGMENT_ROUGHNESS
+                color = float4(md.Roughness.xxx, 1);
+            #elif DEBUG_FLAG == DEBUG_FLAG_FRAGMENT_GGX
+                color = float4(specularTerm.xxx, 1);
+            #elif DEBUG_FLAG == DEBUG_FLAG_FRAGMENT_SPECULAR_COLOR
+                color = float4(specularColor, 1);
+            #endif
+        #endif
+    #endif
+
+    return color;
+}
+
+VS_OUTPUT Basic_VS(float4 positionOS : POSITION, float3 normalOS : NORMAL, float2 uv : TEXCOORD0, uniform bool useTexture, uniform bool useSphereMap, uniform bool useToon)
+{
+	VS_OUTPUT output = (VS_OUTPUT)0;
+
+    output.positionCS = mul(positionOS, WorldViewProjMatrix);
+    output.uv = uv;
+    output.positionWS = mul(positionOS, (float3x3)WorldMatrix).xyz;
+    output.viewDirectionWS = normalize(CameraPosition - output.positionWS);
+    output.normalWS = normalize(mul(normalOS, (float3x3)WorldMatrix));
+
+    return output;
+}
+
+float4 Basic_PS(VS_OUTPUT input, float vFace : VFACE, uniform bool useTexture, uniform bool useSphereMap, uniform bool useToon) : COLOR0
+{
+    return Main_PS(input, vFace >= 0, useTexture, useSphereMap, useToon, false);
+}
+
+VS_OUTPUT Shadow_VS(float4 positionOS : POSITION, float3 normalOS : NORMAL, float2 uv : TEXCOORD0, uniform bool useTexture, uniform bool useSphereMap, uniform bool useToon)
+{
+	VS_OUTPUT output = (VS_OUTPUT)0;
+
+    output.positionCS = mul(positionOS, WorldViewProjMatrix);
+    output.uv = uv;
+    output.positionWS = mul(positionOS, (float3x3)WorldMatrix).xyz;
+    output.viewDirectionWS = normalize(CameraPosition - output.positionWS);
+    output.normalWS = normalize(mul(normalOS, (float3x3)WorldMatrix));
+    output.ZCalcTex = mul(positionOS, LightWorldViewProjMatrix);
+
+    return output;
+}
+
+float4 Shadow_PS(VS_OUTPUT input, float vFace : VFACE, uniform bool useTexture, uniform bool useSphereMap, uniform bool useToon) : COLOR0
+{
+    return Main_PS(input, vFace >= 0, useTexture, useSphereMap, useToon, true);
+}
+
+struct VS_ZValuePlot_OUTPUT {
+	float4 positionCS : POSITION;		
+    float2 uv		    : TEXCOORD0;	  
+	float4 shadowMapTex : TEXCOORD1;		
+};
+
+VS_ZValuePlot_OUTPUT ZValuePlot_VS(float4 positionOS : POSITION, float2 uv : TEXCOORD0)
+{
+	VS_ZValuePlot_OUTPUT output = (VS_ZValuePlot_OUTPUT)0;
+
+	output.positionCS = mul(positionOS, LightWorldViewProjMatrix);
+    output.uv = uv;
+	output.shadowMapTex = output.positionCS;
+
+	return output;
+}
+
+float4 ZValuePlot_PS(VS_ZValuePlot_OUTPUT input, uniform bool useTexture) : COLOR
+{
+    float alpha = 1;
+    if (useTexture)
+    {
+        float4 diffuseTex = tex2D(DiffuseTextureSampler, input.uv);
+        alpha = diffuseTex.a;
+    }
+    clip(alpha - 0.01);
+    return float4(input.shadowMapTex.z/input.shadowMapTex.w,0,0,alpha);
+}
+
+VS_OUTPUT Edge_VS(float4 positionOS : POSITION)
+{
+    VS_OUTPUT output = (VS_OUTPUT)0;
+    output.positionCS = mul(positionOS, WorldViewProjMatrix);
+    return output;
+}
+
+float4 Edge_PS(VS_OUTPUT input) : COLOR0
+{
+    float4 color = EdgeColor;
+	return color;
+}
+
+technique mmd_object <string MMDPass = "object";> {
+    pass DrawObject {
+		VertexShader = compile vs_3_0 Basic_VS(true, true, true);
+		PixelShader  = compile ps_3_0 Basic_PS(true, true, true);
+	}
+}
+technique mmd_zplot<string MMDPass = "zplot";> {
+    pass ZValuePlot {
+		AlphaBlendEnable = FALSE;
+		VertexShader = compile vs_2_0 ZValuePlot_VS();
+		PixelShader  = compile ps_2_0 ZValuePlot_PS(true);
+	}
+}
+technique mmd_object_ss<string MMDPass = "object_ss";> {
+    pass DrawObject {
+		VertexShader = compile vs_3_0 Shadow_VS(true, true, true);
+		PixelShader  = compile ps_3_0 Shadow_PS(true, true, true);
+	}
+}
+technique mmd_edge < string MMDPass = "edge"; > {
+    pass DrawEdge {
+        CULLMODE = CW;
+		VertexShader = compile vs_3_0 Edge_VS();
+		PixelShader  = compile ps_3_0 Edge_PS();
+	}
+}
